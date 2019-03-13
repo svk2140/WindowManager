@@ -33,7 +33,7 @@ class MainWindow
         stage.title = "WindowMonitor"
     }
 
-    data class RowProgram(val programName: String, var time: Long, val titles: TableView<RowTitle> = TableView<RowTitle>())
+    data class RowProgram(val programName: String, val processName: String, var time: Long, val titles: TableView<RowTitle> = TableView())
     {
         companion object
         {

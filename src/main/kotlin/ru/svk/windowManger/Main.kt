@@ -1,13 +1,17 @@
 package ru.svk.windowManger
 
 import com.sun.jna.platform.win32.User32
+import com.sun.jna.platform.win32.WinDef
 import com.sun.jna.platform.win32.WinUser
+import com.sun.jna.ptr.IntByReference
 import javafx.application.Application
 import javafx.application.Platform
 import javafx.event.EventHandler
 import javafx.stage.Stage
 import java.awt.*
+import java.io.InputStreamReader
 import java.net.URL
+import java.nio.charset.Charset
 import javax.imageio.ImageIO
 
 fun main(args: Array<String>)
@@ -21,7 +25,6 @@ class Main : Application()
     lateinit var th: Thread
 
     val programs = Data.load()
-    var tempTime: Long = System.currentTimeMillis()
 
     override fun start(stage: Stage)
     {
@@ -34,20 +37,54 @@ class Main : Application()
         th = object : Thread()
         {
             var prewWindowText = ""
+            var tempTime: Long = System.currentTimeMillis()
 
             override fun run()
             {
                 while (!isInterrupted)
                 {
-                    if(WinUser.WINDOWINFO().also { User32.INSTANCE.GetWindowInfo(User32.INSTANCE.GetForegroundWindow(), it) }.dwStyle.let { it > 0 || it == -1778384896 })
+                    val window = WindowInfo.getForegroundWindow()
+                    if (window.dwStyle > 0 || window.dwStyle == -1778384896)// || Desktop
                     {
-                        val textLenght = User32.INSTANCE.GetWindowTextLength(User32.INSTANCE.GetForegroundWindow())
-                        String(CharArray(textLenght + 1).also { User32.INSTANCE.GetWindowText(User32.INSTANCE.GetForegroundWindow(), it, textLenght + 1) }).let {
-                            if (it != prewWindowText)
-                            {
-                                changeWindow(it, prewWindowText)
-                                prewWindowText = it
+                        if ((if(window.processName == "explorer.exe") "Explorer " else window.title) != prewWindowText)
+                        {
+                            val newWindowText = window.title.split("-")
+                            var newProgramName = newWindowText.last().dropLast(1).trim()
+                            val newWindowTitle = newWindowText.dropLast(1).joinToString()
+
+                            val prewWindowText = prewWindowText.split("-")
+                            var prewProgramName = prewWindowText.last().dropLast(1).trim()
+                            val prewWindowTitle = prewWindowText.dropLast(1).joinToString()
+
+                            if(window.processName == "explorer.exe") newProgramName = "Explorer"
+
+                            programs.items.find { it.programName == newProgramName }.also {
+                                if(it == null)
+                                {
+                                    programs.items.add(MainWindow.RowProgram(newProgramName, window.processName, 0).also {
+                                        it.titles.items.add(MainWindow.RowProgram.RowTitle(newWindowTitle, 0))
+                                    })
+                                }
                             }
+
+                            programs.items.find { it.programName == prewProgramName }?.also { program ->
+                                val delta = System.currentTimeMillis() - tempTime
+                                program.time += delta
+
+                                program.titles.items.find { it.title == prewWindowTitle }.also {
+                                    if (it != null)
+                                        it.time += delta
+                                    else
+                                        program.titles.items.add(MainWindow.RowProgram.RowTitle(newWindowTitle, 0))
+                                }
+                            }
+
+                            programs.columns[1].tableView.refresh()
+
+                            tempTime = System.currentTimeMillis()
+                            this.prewWindowText = if(window.processName == "explorer.exe") "Explorer " else window.title
+
+                            Data.save()
                         }
                     }
 
@@ -58,47 +95,44 @@ class Main : Application()
         th.start()
     }
 
-    fun changeWindow(newWindowText: String, prewWindowText: String)
-    {
-        val newWindowText = newWindowText.split("-")
-        val newProgramName = newWindowText.last().dropLast(1).trim()
-        val newWindowTitle = newWindowText.dropLast(1).joinToString()
-
-        val prewWindowText = prewWindowText.split("-")
-        val prewProgramName = prewWindowText.last().dropLast(1).trim()
-        val prewWindowTitle = prewWindowText.dropLast(1).joinToString()
-
-        programs.items.find { it.programName == newProgramName }.also {
-            if(it == null)
-            {
-                programs.items.add(MainWindow.RowProgram(newProgramName, 0).also {
-                    it.titles.items.add(MainWindow.RowProgram.RowTitle(newWindowTitle, 0))
-                })
-            }
-        }
-
-        programs.items.find { it.programName == prewProgramName }?.also { program ->
-            val delta = System.currentTimeMillis() - tempTime
-            program.time += delta
-
-            program.titles.items.find { it.title == prewWindowTitle }.also {
-                if (it != null)
-                    it.time += delta
-                else
-                    program.titles.items.add(MainWindow.RowProgram.RowTitle(newWindowTitle, 0))
-            }
-        }
-
-        programs.columns[1].tableView.refresh()
-
-        tempTime = System.currentTimeMillis()
-    }
-
     override fun stop()
     {
         Data.save()
         th.interrupt()
         super.stop()
+    }
+
+    data class WindowInfo(val title: String, val processName: String, val dwStyle: Int)
+    {
+        companion object
+        {
+            val user32 = User32.INSTANCE
+
+            fun getForegroundWindow(): WindowInfo
+            {
+                val foregroundWindow = user32.GetForegroundWindow()
+                val dwStyle = WinUser.WINDOWINFO().also { user32.GetWindowInfo(foregroundWindow, it) }.dwStyle
+                val titleTextLenght = user32.GetWindowTextLength(foregroundWindow)+1
+                val title = String(CharArray(titleTextLenght).also { user32.GetWindowText(foregroundWindow, it, titleTextLenght+1) })
+                return WindowInfo(title, getProcessName(foregroundWindow)!!, dwStyle)
+            }
+
+            fun getProcessName(foregroundWindow: WinDef.HWND): String?
+            {
+                var ret: String? = null
+
+                InputStreamReader(Runtime.getRuntime().exec(System.getenv("windir") +"\\system32\\"+"tasklist.exe /fo csv /nh").getInputStream(), Charset.forName("Cp866")).forEachLine {
+                        val arr = it.split(",").map { it.replace("\"", "") }
+
+                        if(arr[1].toInt() == IntByReference().also { user32.GetWindowThreadProcessId(foregroundWindow, it) }.value)
+                        {
+                            ret = arr[0]
+                        }
+                }
+
+                return ret
+            }
+        }
     }
 }
 

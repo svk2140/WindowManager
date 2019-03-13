@@ -18,6 +18,7 @@ object Data
         {
             nbt.add(CompoundTag().also {
                 it.putString("programName", program.programName)
+                it.putString("processName", program.processName)
                 it.putLong("time", program.time)
                 it.put("titles", ListTag(CompoundTag::class.java).also {
                     for (title in program.titles.items)
@@ -46,7 +47,8 @@ object Data
             {
                 programs.items.add(MainWindow.RowProgram(
                         program.getString("programName"),
-                        program.getLong("time"),
+                        program.getString("processName"),
+                                program.getLong("time"),
                         TableView<MainWindow.RowProgram.RowTitle>().also { table ->
                             program.getListTag("titles").forEach {
                                 val nbt = it as CompoundTag
